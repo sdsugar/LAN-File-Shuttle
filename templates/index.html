@@ -1,0 +1,1663 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% if view_mode == 'workspace' %}传输工作台 - {{ session.name }}{% else %}局域网点对点临时文件传输工具{% endif %}</title>
+  
+  <!-- 引入 Tailwind CSS (若有外网环境) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#eef2ff',
+              100: '#e0e7ff',
+              500: '#6366f1',
+              600: '#4f46e5',
+              700: '#4338ca',
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- 离线基础兜底样式，保证纯断网环境下界面依然优雅 -->
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background-color: #f8fafc;
+      color: #1e293b;
+    }
+    .dropzone-active {
+      border-color: #4f46e5 !important;
+      background-color: #eef2ff !important;
+    }
+    /* 进度条动画 */
+    @keyframes progress-stripe {
+      0% { background-position: 1rem 0; }
+      100% { background-position: 0 0; }
+    }
+    .progress-animated {
+      background-image: linear-gradient(45deg, rgba(255, 255, 255, 0.2) 25%, transparent 25%, transparent 50%, rgba(255, 255, 255, 0.2) 50%, rgba(255, 255, 255, 0.2) 75%, transparent 75%, transparent);
+      background-size: 1rem 1rem;
+      animation: progress-stripe 1s linear infinite;
+    }
+    /* 自定义滚动条 */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #94a3b8;
+    }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col bg-slate-50 text-slate-800 antialiased">
+
+  <!-- ================= 顶部全局导航栏 ================= -->
+  <header class="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      <div class="flex items-center space-x-3">
+        {% if view_mode == 'host' %}
+          <a href="/" class="flex items-center space-x-2 text-indigo-600 hover:text-indigo-700 transition">
+            <svg class="w-8 h-8 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+            </svg>
+            <span class="font-bold text-lg tracking-tight text-slate-900 hidden sm:inline">LAN File Shuttle</span>
+          </a>
+        {% else %}
+          <div class="flex items-center space-x-2 text-indigo-600">
+            <svg class="w-8 h-8 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+            </svg>
+            <span class="font-bold text-lg tracking-tight text-slate-900 hidden sm:inline">LAN File Shuttle</span>
+          </div>
+        {% endif %}
+        <span class="text-xs bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full font-medium border border-indigo-100">
+          局域网点对点
+        </span>
+      </div>
+
+      <!-- 右侧控制区 -->
+      <div class="flex items-center space-x-4">
+        {% if view_mode == 'workspace' %}
+          <div class="flex items-center space-x-2 text-sm bg-emerald-50 text-emerald-700 px-3 py-1 rounded-full border border-emerald-200">
+            <span class="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
+            <span class="font-medium">在线: <span id="onlineCount">1</span> 台设备</span>
+          </div>
+        {% elif view_mode == 'host' %}
+          <div class="text-xs text-slate-500 hidden md:block">
+            本机 IP: <span class="font-mono text-slate-700 font-semibold">{{ lan_ips[0] if lan_ips else '127.0.0.1' }}</span>
+          </div>
+        {% endif %}
+      </div>
+    </div>
+  </header>
+
+
+  <!-- ================= 主内容区域 ================= -->
+  <main class="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8">
+
+    <!-- ----------------- 视图 1: 404 / 异常页面 ----------------- -->
+    {% if view_mode == 'not_found' %}
+      <div class="max-w-lg mx-auto mt-16 bg-white p-8 rounded-2xl shadow-sm border border-slate-200 text-center">
+        <div class="w-16 h-16 bg-rose-50 text-rose-500 rounded-full flex items-center justify-center mx-auto mb-4">
+          <svg class="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+        </div>
+        <h2 class="text-xl font-bold text-slate-900 mb-2">传输会话已失效</h2>
+        <p class="text-sm text-slate-600 mb-6">{{ message }}</p>
+        {% if is_host %}
+          <a href="/" class="inline-flex items-center px-4 py-2 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700">
+            返回主机控制台
+          </a>
+        {% else %}
+          <button onclick="window.location.reload()" class="inline-flex items-center px-4 py-2 border border-slate-300 rounded-lg shadow-sm text-sm font-medium text-slate-700 bg-white hover:bg-slate-50 transition">
+            刷新重试
+          </button>
+        {% endif %}
+      </div>
+
+    <!-- ----------------- 视图 2: 访客端说明页面 (Guest View) ----------------- -->
+    {% elif view_mode == 'guest' %}
+      <div class="max-w-md mx-auto mt-12 bg-white p-6 sm:p-8 rounded-2xl shadow-sm border border-slate-200 text-center">
+        <div class="w-14 h-14 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-indigo-100">
+          <svg class="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+          </svg>
+        </div>
+        <h2 class="text-xl font-bold text-slate-900 mb-1.5">局域网点对点临时文件传输</h2>
+        <p class="text-xs text-slate-500 mb-5 leading-relaxed">
+          请输入主机分享的传输码（如 4 位数字口令）直接进入
+        </p>
+
+        <!-- 极简传输码直接输入框 -->
+        <div class="p-4 bg-slate-50 rounded-2xl border border-slate-200 mb-5 text-left">
+          <label for="guestCodeInput" class="block text-xs font-bold text-slate-700 mb-2">输入传输码 / 取件码：</label>
+          <div class="flex items-center space-x-2">
+            <input
+              type="text"
+              id="guestCodeInput"
+              maxlength="20"
+              placeholder="例如: 8821"
+              autofocus
+              class="block w-full text-center font-mono text-lg font-bold tracking-widest uppercase rounded-xl border border-slate-300 py-2 focus:border-indigo-500 focus:ring-indigo-500 bg-white"
+              onkeydown="if(event.key==='Enter') goToGuestCode()"
+            />
+            <button
+              type="button"
+              onclick="goToGuestCode()"
+              class="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-sm transition flex-shrink-0"
+            >
+              进入
+            </button>
+          </div>
+        </div>
+
+        <p class="text-[11px] text-slate-400 mb-4">或者向主机发起人索取二维码直接扫码连接</p>
+
+        <div class="text-xs text-slate-400 border-t border-slate-100 pt-3 flex items-center justify-center space-x-1.5">
+          <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+          <span>局域网服务运行正常</span>
+        </div>
+      </div>
+
+    <!-- ----------------- 视图 2: 主机启动引导与会话创建 (Host View) ----------------- -->
+    {% elif view_mode == 'host' %}
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
+        
+        <!-- 左侧：新建传输会话表单 -->
+        <div class="lg:col-span-7 space-y-6">
+          <div class="bg-white rounded-2xl p-6 sm:p-8 shadow-sm border border-slate-200">
+            <div class="border-b border-slate-100 pb-4 mb-6">
+              <h1 class="text-2xl font-bold text-slate-900 tracking-tight">创建局域网专属传输通道</h1>
+              <p class="text-sm text-slate-500 mt-1">文件直接写入并落盘至您指定的本地磁盘目录，无中间数据库，重启即焚。</p>
+            </div>
+
+            <form id="createSessionForm" class="space-y-6" onsubmit="handleCreateSession(event)">
+              <!-- 步骤 1: 选择/指定本地存储文件夹路径 -->
+              <div>
+                <div class="flex items-center justify-between mb-2">
+                  <label for="storagePath" class="block text-sm font-semibold text-slate-800">
+                    <span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-indigo-600 text-white text-xs font-bold mr-1.5">1</span>
+                    本地存储绝对路径 <span class="text-rose-500">*</span>
+                  </label>
+                  <button type="button" onclick="validateDirectory(true)" class="text-xs text-indigo-600 hover:text-indigo-800 font-medium flex items-center space-x-1">
+                    <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <span>校验目录</span>
+                  </button>
+                </div>
+                
+                <div class="relative rounded-lg shadow-sm">
+                  <input
+                    type="text"
+                    id="storagePath"
+                    name="storagePath"
+                    required
+                    value="{{ default_path }}"
+                    placeholder="例如: D:\Transfers 或 /Users/name/Transfers"
+                    class="block w-full rounded-lg border-slate-300 border px-3.5 py-2.5 text-sm focus:border-indigo-500 focus:ring-indigo-500 font-mono text-slate-700 bg-slate-50/50"
+                    oninput="clearValidationState()"
+                  />
+                </div>
+
+                <!-- 路径校验状态提示框 -->
+                <div id="pathValidationStatus" class="hidden mt-2 text-xs p-2.5 rounded-lg"></div>
+
+                <!-- 常用路径快捷标签 -->
+                <div class="mt-3">
+                  <div class="text-xs text-slate-400 mb-1.5 font-medium">快捷预设推荐：</div>
+                  <div class="flex flex-wrap gap-2">
+                    {% for p in presets %}
+                      <button
+                        type="button"
+                        onclick="setPath('{{ p.path | replace('\\', '\\\\') }}')"
+                        class="text-xs bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 hover:border-indigo-200 border border-slate-200 text-slate-600 px-2.5 py-1 rounded-md transition"
+                      >
+                        {{ p.name }}
+                      </button>
+                    {% endfor %}
+                  </div>
+                </div>
+              </div>
+
+              <!-- 步骤 2: 会话属性与权限多选配置 -->
+              <div class="pt-4 border-t border-slate-100">
+                <div class="flex items-center justify-between mb-2">
+                  <label class="block text-sm font-semibold text-slate-800">
+                    <span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-indigo-600 text-white text-xs font-bold mr-1.5">2</span>
+                    通道权限设置 <span class="text-rose-500">*</span>
+                    <span class="text-xs font-normal text-slate-400 ml-1">（支持任意多选组合）</span>
+                  </label>
+                  <!-- 快捷组合推荐 -->
+                  <div class="flex items-center space-x-1 text-xs">
+                    <span class="text-slate-400 hidden sm:inline mr-1">快捷模板:</span>
+                    <button type="button" onclick="setPermissionPreset('full')" class="px-2 py-0.5 bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 rounded text-slate-600 border border-slate-200 transition">全功能</button>
+                    <button type="button" onclick="setPermissionPreset('upload_only')" class="px-2 py-0.5 bg-slate-100 hover:bg-emerald-50 hover:text-emerald-600 rounded text-slate-600 border border-slate-200 transition">仅上传(收集箱)</button>
+                    <button type="button" onclick="setPermissionPreset('download_only')" class="px-2 py-0.5 bg-slate-100 hover:bg-amber-50 hover:text-amber-600 rounded text-slate-600 border border-slate-200 transition">仅浏览/下载</button>
+                  </div>
+                </div>
+
+                <!-- 会话备注与自定义传输码 -->
+                <div class="grid grid-cols-1 sm:grid-cols-12 gap-3 mb-3">
+                  <div class="sm:col-span-7">
+                    <input
+                      type="text"
+                      id="sessionName"
+                      placeholder="会话备注名称（可选，如：期末作业收取）"
+                      class="block w-full rounded-lg border-slate-300 border px-3 py-2 text-sm focus:border-indigo-500 focus:ring-indigo-500"
+                    />
+                  </div>
+                  <div class="sm:col-span-5">
+                    <input
+                      type="text"
+                      id="customToken"
+                      maxlength="20"
+                      placeholder="自定义传输码（留空默认4位数字）"
+                      class="block w-full rounded-lg border-slate-300 border px-3 py-2 text-sm focus:border-indigo-500 focus:ring-indigo-500 font-mono text-slate-700"
+                    />
+                  </div>
+                </div>
+
+                <!-- 三大多选权限卡片 (仅上传、仅浏览、仅下载，可多选) -->
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <!-- 权限 1: 仅/允许上传 -->
+                  <label id="card_perm_upload" class="relative flex flex-col p-3 rounded-xl border-2 border-indigo-500 bg-indigo-50/40 cursor-pointer shadow-sm transition group">
+                    <div class="flex items-center justify-between mb-1.5">
+                      <span class="p-1.5 rounded-lg bg-emerald-100 text-emerald-700">
+                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                        </svg>
+                      </span>
+                      <input type="checkbox" id="perm_upload" value="upload" checked class="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" onchange="updatePermCardStyles()" />
+                    </div>
+                    <span class="text-xs font-bold text-slate-800">允许上传</span>
+                    <span class="text-[11px] text-slate-500 mt-0.5">支持拖拽与选择文件、文件夹流式写入磁盘</span>
+                  </label>
+
+                  <!-- 权限 2: 仅/允许浏览 -->
+                  <label id="card_perm_browse" class="relative flex flex-col p-3 rounded-xl border-2 border-indigo-500 bg-indigo-50/40 cursor-pointer shadow-sm transition group">
+                    <div class="flex items-center justify-between mb-1.5">
+                      <span class="p-1.5 rounded-lg bg-blue-100 text-blue-700">
+                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                        </svg>
+                      </span>
+                      <input type="checkbox" id="perm_browse" value="browse" checked class="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" onchange="updatePermCardStyles()" />
+                    </div>
+                    <span class="text-xs font-bold text-slate-800">允许浏览</span>
+                    <span class="text-[11px] text-slate-500 mt-0.5">可查看目录树结构，若关闭则为盲投收集箱</span>
+                  </label>
+
+                  <!-- 权限 3: 仅/允许下载 -->
+                  <label id="card_perm_download" class="relative flex flex-col p-3 rounded-xl border-2 border-indigo-500 bg-indigo-50/40 cursor-pointer shadow-sm transition group">
+                    <div class="flex items-center justify-between mb-1.5">
+                      <span class="p-1.5 rounded-lg bg-amber-100 text-amber-700">
+                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                        </svg>
+                      </span>
+                      <input type="checkbox" id="perm_download" value="download" checked class="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" onchange="updatePermCardStyles()" />
+                    </div>
+                    <span class="text-xs font-bold text-slate-800">允许下载</span>
+                    <span class="text-[11px] text-slate-500 mt-0.5">支持单文件直接下载及文件夹内存流式打包</span>
+                  </label>
+                </div>
+              </div>
+
+              <!-- 步骤 3: 提交生成按钮 -->
+              <div class="pt-2">
+                <button
+                  type="submit"
+                  id="submitBtn"
+                  class="w-full flex items-center justify-center px-6 py-3.5 border border-transparent rounded-xl shadow-md text-base font-semibold text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition"
+                >
+                  <svg class="w-5 h-5 mr-2 -ml-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                  </svg>
+                  生成局域网专属传输链接与二维码
+                </button>
+              </div>
+            </form>
+          </div>
+
+          <!-- 生成成功展示卡片（初始隐藏） -->
+          <div id="newSessionResult" class="hidden bg-gradient-to-br from-indigo-500 to-indigo-700 rounded-2xl p-6 sm:p-8 text-white shadow-xl animate-fade-in">
+            <div class="flex items-center space-x-2 text-indigo-100 text-sm font-semibold mb-2">
+              <svg class="w-5 h-5 text-emerald-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <span>专属传输通道已激活</span>
+            </div>
+            
+            <h3 class="text-xl sm:text-2xl font-black mb-4 tracking-tight" id="resultSessionName">默认传输通道</h3>
+
+            <div class="grid grid-cols-1 md:grid-cols-12 gap-6 items-center bg-white/10 p-5 rounded-xl backdrop-blur-sm border border-white/20">
+              <!-- 二维码区 -->
+              <div class="md:col-span-5 flex flex-col items-center justify-center p-3 bg-white rounded-xl shadow-md">
+                <img id="qrCodeImg" src="" alt="分享二维码" class="w-44 h-44 object-contain" />
+                <span class="text-xs text-slate-500 mt-2 font-medium">手机扫码直接打开传输</span>
+              </div>
+
+              <!-- 链接与快捷操作 -->
+              <div class="md:col-span-7 space-y-4">
+                <div>
+                  <label class="text-xs text-indigo-100 font-medium">局域网专属访问链接：</label>
+                  <div class="flex items-center mt-1 bg-white/20 rounded-lg p-2 font-mono text-xs break-all border border-white/30 text-white select-all">
+                    <span id="shareUrlText"></span>
+                  </div>
+                </div>
+
+                <div class="flex flex-col sm:flex-row gap-2.5">
+                  <button
+                    onclick="copyShareUrl()"
+                    class="flex-1 inline-flex items-center justify-center px-4 py-2.5 bg-white text-indigo-700 hover:bg-indigo-50 rounded-lg font-bold text-sm shadow-sm transition"
+                  >
+                    <svg class="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+                    </svg>
+                    一键复制链接
+                  </button>
+
+                  <a
+                    id="openWorkspaceBtn"
+                    href="#"
+                    target="_blank"
+                    class="flex-1 inline-flex items-center justify-center px-4 py-2.5 bg-indigo-900/60 hover:bg-indigo-900 text-white rounded-lg font-semibold text-sm border border-white/20 transition"
+                  >
+                    立即打开工作台 &rarr;
+                  </a>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 右侧：当前活跃会话列表与说明卡片 -->
+        <div class="lg:col-span-5 space-y-6">
+          <!-- 活跃会话列表 -->
+          <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-200">
+            <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+              <h2 class="text-base font-bold text-slate-900 flex items-center">
+                <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 mr-2"></span>
+                当前活跃会话通道
+              </h2>
+              <button onclick="fetchActiveSessions()" class="text-xs text-indigo-600 hover:text-indigo-800 font-medium">刷新</button>
+            </div>
+
+            <div id="activeSessionsList" class="mt-4 space-y-3">
+              <div class="text-xs text-slate-400 text-center py-6">正在加载活跃会话...</div>
+            </div>
+          </div>
+
+          <!-- 安全与无痕说明 -->
+          <div class="bg-slate-100/70 rounded-2xl p-6 border border-slate-200 text-slate-600 text-xs space-y-3">
+            <h3 class="font-bold text-slate-800 text-sm flex items-center">
+              <svg class="w-4 h-4 text-indigo-600 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              轻量与无痕设计原则
+            </h3>
+            <p>1. <strong>无中心数据库</strong>：所有会话仅保存在内存中，重启即焚，不残留冗余垃圾元数据。</p>
+            <p>2. <strong>物理磁盘直落</strong>：上传的文件直接流式写入目标目录，绝不保存额外临时缓存文件。</p>
+            <p>3. <strong>内存流式打包</strong>：文件夹即时流式打 ZIP 压缩包下载，边压缩边输出，不占物理磁盘。</p>
+            <p>4. <strong>隔离与防护</strong>：全链路防路径穿越校验，限制单文件/压缩包 1GB 上限。</p>
+          </div>
+        </div>
+
+      </div>
+
+    <!-- ----------------- 视图 3: 传输工作台 (Workspace View) ----------------- -->
+    {% elif view_mode == 'workspace' %}
+      <div class="space-y-6">
+        
+        <!-- 头部会话信息栏 -->
+        <div class="bg-white rounded-2xl p-5 sm:p-6 shadow-sm border border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <div class="flex flex-wrap items-center gap-2">
+              <h1 class="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">{{ session.name }}</h1>
+              
+              <!-- 权限状态标签组 -->
+              <div class="flex items-center space-x-1.5">
+                {% if session.can_upload %}
+                  <span class="text-[11px] bg-emerald-50 text-emerald-700 border border-emerald-200 font-semibold px-2 py-0.5 rounded-full flex items-center">
+                    <svg class="w-3 h-3 mr-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
+                    可上传
+                  </span>
+                {% else %}
+                  <span class="text-[11px] bg-slate-100 text-slate-400 border border-slate-200 px-2 py-0.5 rounded-full">禁止上传</span>
+                {% endif %}
+
+                {% if session.can_browse %}
+                  <span class="text-[11px] bg-blue-50 text-blue-700 border border-blue-200 font-semibold px-2 py-0.5 rounded-full flex items-center">
+                    <svg class="w-3 h-3 mr-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
+                    可浏览
+                  </span>
+                {% else %}
+                  <span class="text-[11px] bg-purple-50 text-purple-700 border border-purple-200 font-semibold px-2 py-0.5 rounded-full">盲投收集箱</span>
+                {% endif %}
+
+                {% if session.can_download %}
+                  <span class="text-[11px] bg-amber-50 text-amber-700 border border-amber-200 font-semibold px-2 py-0.5 rounded-full flex items-center">
+                    <svg class="w-3 h-3 mr-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
+                    可下载
+                  </span>
+                {% else %}
+                  <span class="text-[11px] bg-slate-100 text-slate-400 border border-slate-200 px-2 py-0.5 rounded-full">禁止下载</span>
+                {% endif %}
+
+                {% if is_host %}
+                  <button
+                    type="button"
+                    onclick="openEditPermModal('{{ token }}', '{{ session.name }}', {{ session.permissions | tojson }})"
+                    class="ml-2 text-xs text-indigo-600 hover:text-indigo-800 font-semibold px-2 py-0.5 rounded-lg hover:bg-indigo-50 border border-indigo-200 transition inline-flex items-center space-x-1"
+                    title="作为主机管理员，随时修改通道权限"
+                  >
+                    <svg class="w-3.5 h-3.5 mr-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                    </svg>
+                    <span>修改权限</span>
+                  </button>
+                {% endif %}
+              </div>
+            </div>
+            
+            <div class="text-xs text-slate-500 mt-1.5 flex flex-wrap items-center gap-2">
+              {% if is_host and session.storage_dir %}
+                <span>物理存储目录: <span class="font-mono text-slate-700 font-medium">{{ session.storage_dir }}</span></span>
+                <span>•</span>
+              {% endif %}
+              <span>创建时间: {{ session.created_at }}</span>
+              <span>•</span>
+              <span class="text-indigo-600 font-medium">点对点安全直传</span>
+            </div>
+          </div>
+
+          <!-- 分享操作 -->
+          <div class="flex items-center space-x-2">
+            <button
+              onclick="copyCurrentUrl()"
+              class="inline-flex items-center px-3.5 py-2 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 shadow-sm transition"
+            >
+              <svg class="w-4 h-4 mr-1 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+              </svg>
+              分享此链接
+            </button>
+            <button
+              onclick="toggleWorkspaceQrModal()"
+              class="inline-flex items-center px-3.5 py-2 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 shadow-sm transition"
+            >
+              <svg class="w-4 h-4 mr-1 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" />
+              </svg>
+              展示二维码
+            </button>
+          </div>
+        </div>
+
+        <!-- 上传拖拽投放区域 (仅在具备 upload 权限时显示) -->
+        {% if session.can_upload %}
+          <div
+            id="dropzone"
+            class="relative border-2 border-dashed border-slate-300 hover:border-indigo-500 bg-white rounded-2xl p-6 sm:p-10 text-center transition-all cursor-pointer shadow-sm group"
+            ondragover="handleDragOver(event)"
+            ondragleave="handleDragLeave(event)"
+            ondrop="handleDrop(event)"
+          >
+            <input type="file" id="fileInput" multiple class="hidden" onchange="handleFileSelect(event)" />
+            <input type="file" id="folderInput" webkitdirectory directory multiple class="hidden" onchange="handleFolderSelect(event)" />
+
+            <div class="flex flex-col items-center justify-center space-y-3">
+              <div class="w-14 h-14 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center group-hover:scale-110 group-hover:bg-indigo-600 group-hover:text-white transition duration-200">
+                <svg class="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                </svg>
+              </div>
+
+              <div>
+                <p class="text-base font-bold text-slate-800">
+                  拖拽单个/多个文件或整个文件夹到这里
+                </p>
+                <p class="text-xs text-slate-400 mt-1">支持任何文件格式，支持保留文件夹多层级子目录，流式写入，单个文件不超过 1GB</p>
+              </div>
+
+              <div class="flex items-center space-x-3 pt-2" onclick="event.stopPropagation()">
+                <button
+                  type="button"
+                  onclick="document.getElementById('fileInput').click()"
+                  class="inline-flex items-center px-4 py-2 border border-slate-300 rounded-xl text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 shadow-sm transition"
+                >
+                  <svg class="w-4 h-4 mr-1.5 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                  选择文件上传
+                </button>
+                <button
+                  type="button"
+                  onclick="document.getElementById('folderInput').click()"
+                  class="inline-flex items-center px-4 py-2 border border-indigo-200 bg-indigo-50/80 hover:bg-indigo-100 rounded-xl text-xs font-semibold text-indigo-700 shadow-sm transition"
+                >
+                  <svg class="w-4 h-4 mr-1.5 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                  </svg>
+                  选择文件夹上传 (保留结构)
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 实时上传进度面板 -->
+          <div id="uploadProgressPanel" class="hidden bg-white rounded-2xl p-5 shadow-sm border border-indigo-100 space-y-4">
+            <div class="flex items-center justify-between">
+              <div>
+                <h4 class="text-sm font-bold text-slate-800 flex items-center">
+                  <svg class="w-4 h-4 mr-1.5 text-indigo-600 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                  </svg>
+                  正在上传 (<span id="uploadQueueProgressText">0/0</span>)
+                </h4>
+                <div class="text-xs text-slate-500 mt-0.5">
+                  速度: <span id="uploadSpeedText" class="font-mono text-indigo-600 font-semibold">0.0 MB/s</span>
+                  <span class="mx-1">•</span>
+                  已传输: <span id="uploadBytesText" class="font-mono">0 MB / 0 MB</span>
+                </div>
+              </div>
+              <span id="uploadPercentText" class="text-lg font-black text-indigo-600 font-mono">0%</span>
+            </div>
+
+            <!-- 总进度条 -->
+            <div class="w-full bg-slate-100 rounded-full h-3 overflow-hidden">
+              <div id="uploadProgressBar" class="bg-indigo-600 h-3 rounded-full transition-all duration-150 progress-animated" style="width: 0%"></div>
+            </div>
+
+            <!-- 当前正在上传的文件名与队列简略列表 -->
+            <div class="bg-slate-50 rounded-xl p-3 max-h-36 overflow-y-auto text-xs space-y-1.5 border border-slate-100 font-mono text-slate-600" id="uploadFileList">
+            </div>
+          </div>
+        {% else %}
+          <!-- 禁止上传提示卡片 -->
+          <div class="bg-slate-100/60 rounded-xl p-4 border border-slate-200 text-center text-xs text-slate-500 flex items-center justify-center space-x-2">
+            <svg class="w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+            </svg>
+            <span>当前通道未开放上传权限（仅供浏览与下载）</span>
+          </div>
+        {% endif %}
+
+        <!-- 文件管理与浏览区 (若具备 browse 权限则展示列表，否则展示收集箱模式卡片) -->
+        {% if session.can_browse %}
+          <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+            <!-- 顶部工具条：面包屑 + 搜索框 + 动作 -->
+            <div class="p-4 sm:p-5 border-b border-slate-200 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-slate-50/50">
+              <!-- 面包屑导航 -->
+              <nav class="flex items-center space-x-1 text-sm font-medium text-slate-600 overflow-x-auto py-1" id="breadcrumbNav">
+                <span class="text-slate-400">加载目录中...</span>
+              </nav>
+
+              <!-- 搜索框与打包下载 -->
+              <div class="flex items-center space-x-2">
+                <div class="relative">
+                  <input
+                    type="text"
+                    id="searchInput"
+                    placeholder="搜索文件名..."
+                    oninput="handleSearch(this.value)"
+                    class="w-36 sm:w-48 text-xs rounded-lg border-slate-300 border pl-7 pr-2.5 py-1.5 focus:border-indigo-500 focus:ring-indigo-500"
+                  />
+                  <svg class="w-3.5 h-3.5 text-slate-400 absolute left-2 top-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  </svg>
+                </div>
+
+                <!-- 打包下载当前文件夹 (ZIP，仅在具备 download 权限时提供) -->
+                {% if session.can_download %}
+                  <button
+                    type="button"
+                    id="downloadCurrentZipBtn"
+                    onclick="downloadCurrentFolderZip()"
+                    title="边压缩边下载，不产生服务器临时文件"
+                    class="inline-flex items-center px-3 py-1.5 border border-slate-300 rounded-lg text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 shadow-sm transition"
+                  >
+                    <svg class="w-3.5 h-3.5 mr-1 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                    </svg>
+                    <span>打包下载当前目录 (ZIP)</span>
+                  </button>
+                {% endif %}
+
+                <button
+                  type="button"
+                  onclick="loadFiles(currentSubpath)"
+                  title="手动刷新"
+                  class="p-1.5 text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition"
+                >
+                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            <!-- 文件列表表格 -->
+            <div class="overflow-x-auto">
+              <table class="min-w-full divide-y divide-slate-200 text-left text-sm">
+                <thead class="bg-slate-50 text-slate-500 text-xs uppercase font-medium">
+                  <tr>
+                    <th scope="col" class="px-6 py-3">名称</th>
+                    <th scope="col" class="px-6 py-3 w-32">大小</th>
+                    <th scope="col" class="px-6 py-3 w-44 hidden md:table-cell">修改时间</th>
+                    <th scope="col" class="px-6 py-3 w-36 text-right">操作</th>
+                  </tr>
+                </thead>
+                <tbody id="filesTableBody" class="divide-y divide-slate-100 bg-white">
+                  <tr>
+                    <td colspan="4" class="px-6 py-10 text-center text-slate-400 text-xs">
+                      正在读取文件列表...
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        {% else %}
+          <!-- 盲投收集箱模式卡片 (未开放 browse 权限) -->
+          <div class="bg-white rounded-2xl p-8 shadow-sm border border-slate-200 text-center">
+            <div class="w-16 h-16 bg-purple-50 text-purple-600 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-purple-100">
+              <svg class="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" />
+              </svg>
+            </div>
+            <h3 class="text-base font-bold text-slate-800 mb-1">当前通道为【仅上传 / 收集箱模式】</h3>
+            <p class="text-xs text-slate-500 max-w-md mx-auto">为了保证各提交者的数据隐私安全，通道不向客户端公开已存在的文件列表。您上传的文件均直接安全写入主机物理磁盘指定目录中，请放心投递。</p>
+          </div>
+        {% endif %}
+
+      </div>
+
+      <!-- 工作台二维码弹窗 Modal -->
+      <div id="workspaceQrModal" class="hidden fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl max-w-sm w-full p-6 text-center shadow-2xl relative">
+          <button onclick="toggleWorkspaceQrModal()" class="absolute right-4 top-4 text-slate-400 hover:text-slate-600">
+            <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+          <h3 class="text-lg font-bold text-slate-900 mb-1">扫描二维码加入传输</h3>
+          <p class="text-xs text-slate-500 mb-4">同一局域网下的手机或平板扫码即可访问</p>
+          <div class="bg-slate-50 p-4 rounded-xl inline-block border border-slate-100 mb-4">
+            <img src="/api/qrcode?text={{ share_url | urlencode }}" alt="二维码" class="w-48 h-48 mx-auto object-contain" />
+          </div>
+          <div class="text-xs font-mono text-slate-600 bg-slate-100 p-2 rounded-lg break-all select-all mb-4">
+            {{ share_url }}
+          </div>
+          <button onclick="copyCurrentUrl()" class="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold shadow-sm transition">
+            复制链接
+          </button>
+        </div>
+      </div>
+    {% endif %}
+
+  </main>
+
+
+  <!-- ================= 修改通道权限弹窗 (仅主机可用) ================= -->
+  {% if is_host %}
+  <div id="editPermModal" class="hidden fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-5 relative">
+      <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+        <div>
+          <h3 class="text-base font-bold text-slate-900" id="editPermModalTitle">修改通道访问权限</h3>
+          <p class="text-xs text-slate-500 mt-0.5" id="editPermModalSubtitle">调整权限后，所有已连接设备将即时无感同步刷新</p>
+        </div>
+        <button type="button" onclick="closeEditPermModal()" class="text-slate-400 hover:text-slate-600 p-1 rounded-lg">
+          <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+
+      <input type="hidden" id="editPermToken" value="" />
+
+      <!-- 快捷组合模板 -->
+      <div class="flex items-center space-x-1.5 text-xs">
+        <span class="text-slate-400 mr-1">快捷模板:</span>
+        <button type="button" onclick="setEditPermPreset('full')" class="px-2 py-0.5 bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 rounded text-slate-600 border border-slate-200 transition">全功能</button>
+        <button type="button" onclick="setEditPermPreset('upload_only')" class="px-2 py-0.5 bg-slate-100 hover:bg-emerald-50 hover:text-emerald-600 rounded text-slate-600 border border-slate-200 transition">仅上传(收集箱)</button>
+        <button type="button" onclick="setEditPermPreset('download_only')" class="px-2 py-0.5 bg-slate-100 hover:bg-amber-50 hover:text-amber-600 rounded text-slate-600 border border-slate-200 transition">仅浏览/下载</button>
+      </div>
+
+      <!-- 3 个多选权限卡片 -->
+      <div class="space-y-2.5">
+        <!-- 权限 1: 上传 -->
+        <label id="card_edit_upload" class="flex items-center justify-between p-3 rounded-xl border border-slate-200 hover:border-indigo-300 bg-slate-50/50 cursor-pointer transition">
+          <div class="flex items-center space-x-3">
+            <span class="p-1.5 rounded-lg bg-emerald-100 text-emerald-700">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
+            </span>
+            <div>
+              <div class="text-xs font-bold text-slate-800">允许上传</div>
+              <div class="text-[11px] text-slate-500">客户端可拖拽或选择文件/文件夹写入磁盘</div>
+            </div>
+          </div>
+          <input type="checkbox" id="edit_perm_upload" value="upload" class="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" onchange="updateEditCardStyles()" />
+        </label>
+
+        <!-- 权限 2: 浏览 -->
+        <label id="card_edit_browse" class="flex items-center justify-between p-3 rounded-xl border border-slate-200 hover:border-indigo-300 bg-slate-50/50 cursor-pointer transition">
+          <div class="flex items-center space-x-3">
+            <span class="p-1.5 rounded-lg bg-blue-100 text-blue-700">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+            </span>
+            <div>
+              <div class="text-xs font-bold text-slate-800">允许浏览</div>
+              <div class="text-[11px] text-slate-500">可查看目录与文件列表，关闭后为盲投收集箱</div>
+            </div>
+          </div>
+          <input type="checkbox" id="edit_perm_browse" value="browse" class="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" onchange="updateEditCardStyles()" />
+        </label>
+
+        <!-- 权限 3: 下载 -->
+        <label id="card_edit_download" class="flex items-center justify-between p-3 rounded-xl border border-slate-200 hover:border-indigo-300 bg-slate-50/50 cursor-pointer transition">
+          <div class="flex items-center space-x-3">
+            <span class="p-1.5 rounded-lg bg-amber-100 text-amber-700">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+            </span>
+            <div>
+              <div class="text-xs font-bold text-slate-800">允许下载</div>
+              <div class="text-[11px] text-slate-500">支持单文件直接下载及文件夹内存流式打包</div>
+            </div>
+          </div>
+          <input type="checkbox" id="edit_perm_download" value="download" class="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" onchange="updateEditCardStyles()" />
+        </label>
+      </div>
+
+      <div class="flex items-center justify-end space-x-3 pt-2">
+        <button type="button" onclick="closeEditPermModal()" class="px-4 py-2 border border-slate-300 rounded-xl text-xs font-semibold text-slate-700 hover:bg-slate-50 transition">
+          取消
+        </button>
+        <button type="button" id="saveEditPermBtn" onclick="submitEditPermissions()" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold shadow-sm transition">
+          保存修改
+        </button>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+
+  <!-- ================= 全局 Toast 提示容器 ================= -->
+  <div id="toastContainer" class="fixed bottom-5 right-5 z-50 flex flex-col space-y-2 pointer-events-none"></div>
+
+
+  <!-- ================= 前端业务逻辑脚本 ================= -->
+  <script>
+    // 全局常量与状态
+    const VIEW_MODE = "{{ view_mode }}";
+    const SESSION_TOKEN = "{{ token if token else '' }}";
+    const CAN_UPLOAD = {{ 'true' if (session and session.can_upload) else 'false' }};
+    const CAN_BROWSE = {{ 'true' if (session and session.can_browse) else 'false' }};
+    const CAN_DOWNLOAD = {{ 'true' if (session and session.can_download) else 'false' }};
+    let currentSubpath = "";
+    let cachedFilesList = [];
+    let isUploading = false;
+
+    // Toast 提示工具函数
+    function showToast(message, type = 'info') {
+      const container = document.getElementById('toastContainer');
+      const toast = document.createElement('div');
+      toast.className = `pointer-events-auto flex items-center px-4 py-3 rounded-xl shadow-lg border text-sm font-medium transition-all duration-300 transform translate-y-2 opacity-0 ${
+        type === 'success' ? 'bg-emerald-600 text-white border-emerald-700' :
+        type === 'error' ? 'bg-rose-600 text-white border-rose-700' :
+        type === 'warning' ? 'bg-amber-500 text-white border-amber-600' :
+        'bg-slate-800 text-white border-slate-900'
+      }`;
+      toast.innerHTML = `
+        <span>${message}</span>
+        <button class="ml-3 text-white/80 hover:text-white" onclick="this.parentElement.remove()">&times;</button>
+      `;
+      container.appendChild(toast);
+
+      // 进入动效
+      setTimeout(() => {
+        toast.classList.remove('translate-y-2', 'opacity-0');
+      }, 10);
+
+      // 4 秒后自动淡出并移除
+      setTimeout(() => {
+        toast.classList.add('opacity-0');
+        setTimeout(() => toast.remove(), 300);
+      }, 4000);
+    }
+
+    // 复制剪贴板封装
+    function copyText(text, successMsg = '已复制到剪贴板') {
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(() => showToast(successMsg, 'success'));
+      } else {
+        const input = document.createElement('textarea');
+        input.value = text;
+        document.body.appendChild(input);
+        input.select();
+        document.execCommand('copy');
+        document.body.removeChild(input);
+        showToast(successMsg, 'success');
+      }
+    }
+
+
+    /* ==============================================================
+     * 模块 1: 主机管理页 (Host View) 逻辑
+     * ============================================================== */
+    function setPath(path) {
+      const input = document.getElementById('storagePath');
+      input.value = path;
+      validateDirectory(false);
+    }
+
+    function clearValidationState() {
+      const statusBox = document.getElementById('pathValidationStatus');
+      statusBox.className = 'hidden';
+      statusBox.innerHTML = '';
+    }
+
+    // 权限卡片视觉联动与预设模式
+    function updatePermCardStyles() {
+      const cards = [
+        { id: 'perm_upload', cardId: 'card_perm_upload' },
+        { id: 'perm_browse', cardId: 'card_perm_browse' },
+        { id: 'perm_download', cardId: 'card_perm_download' }
+      ];
+      cards.forEach(item => {
+        const el = document.getElementById(item.id);
+        const card = document.getElementById(item.cardId);
+        if (!el || !card) return;
+        if (el.checked) {
+          card.className = "relative flex flex-col p-3 rounded-xl border-2 border-indigo-500 bg-indigo-50/40 cursor-pointer shadow-sm transition group";
+        } else {
+          card.className = "relative flex flex-col p-3 rounded-xl border border-slate-200 bg-white hover:border-slate-300 cursor-pointer shadow-sm transition group opacity-70";
+        }
+      });
+    }
+
+    function setPermissionPreset(mode) {
+      const up = document.getElementById('perm_upload');
+      const br = document.getElementById('perm_browse');
+      const dl = document.getElementById('perm_download');
+      if (!up || !br || !dl) return;
+
+      if (mode === 'full') {
+        up.checked = true;
+        br.checked = true;
+        dl.checked = true;
+      } else if (mode === 'upload_only') {
+        up.checked = true;
+        br.checked = false;
+        dl.checked = false;
+      } else if (mode === 'download_only') {
+        up.checked = false;
+        br.checked = true;
+        dl.checked = true;
+      }
+      updatePermCardStyles();
+    }
+
+    async function validateDirectory(verbose = true) {
+      const pathInput = document.getElementById('storagePath');
+      const statusBox = document.getElementById('pathValidationStatus');
+      const val = pathInput.value.trim();
+      if (!val) {
+        if (verbose) showToast('请先输入文件夹路径', 'warning');
+        return false;
+      }
+
+      const formData = new FormData();
+      formData.append('path', val);
+
+      try {
+        const res = await fetch('/api/validate_path', { method: 'POST', body: formData });
+        const data = await res.json();
+        
+        statusBox.classList.remove('hidden');
+        if (data.valid) {
+          statusBox.className = 'mt-2 text-xs p-2.5 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200 flex items-center justify-between';
+          statusBox.innerHTML = `
+            <span class="flex items-center font-medium">
+              <svg class="w-4 h-4 text-emerald-600 mr-1.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path></svg>
+              ${data.msg} (路径: ${data.path})
+            </span>
+          `;
+          if (verbose) showToast('目录有效且可写入！', 'success');
+          return true;
+        } else {
+          statusBox.className = 'mt-2 text-xs p-2.5 rounded-lg bg-rose-50 text-rose-800 border border-rose-200 flex items-center justify-between';
+          statusBox.innerHTML = `
+            <span class="flex items-center font-medium">
+              <svg class="w-4 h-4 text-rose-600 mr-1.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path></svg>
+              ${data.msg}
+            </span>
+            ${!data.exists ? `<button type="button" onclick="createDirectoryDirectly('${data.path.replace(/\\/g, '\\\\')}')" class="ml-2 px-2 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded font-bold text-xs">一键创建</button>` : ''}
+          `;
+          if (verbose) showToast(data.msg, 'error');
+          return false;
+        }
+      } catch (err) {
+        showToast('校验服务请求失败: ' + err, 'error');
+        return false;
+      }
+    }
+
+    async function createDirectoryDirectly(path) {
+      const formData = new FormData();
+      formData.append('path', path);
+      formData.append('create_if_missing', 'true');
+      const res = await fetch('/api/validate_path', { method: 'POST', body: formData });
+      const data = await res.json();
+      if (data.valid) {
+        showToast('文件夹创建成功！', 'success');
+        validateDirectory(false);
+      } else {
+        showToast('创建失败: ' + data.msg, 'error');
+      }
+    }
+
+    async function handleCreateSession(e) {
+      e.preventDefault();
+      const path = document.getElementById('storagePath').value.trim();
+      const name = document.getElementById('sessionName').value.trim();
+      
+      // 收集多选权限
+      const perms = [];
+      if (document.getElementById('perm_upload').checked) perms.push('upload');
+      if (document.getElementById('perm_browse').checked) perms.push('browse');
+      if (document.getElementById('perm_download').checked) perms.push('download');
+
+      if (perms.length === 0) {
+        showToast('请至少勾选一项通道权限（上传、浏览或下载）', 'warning');
+        return;
+      }
+
+      if (!path) {
+        showToast('请输入存储路径', 'warning');
+        return;
+      }
+
+      const btn = document.getElementById('submitBtn');
+      btn.disabled = true;
+      btn.classList.add('opacity-75');
+
+      const customToken = (document.getElementById('customToken') ? document.getElementById('customToken').value : '').trim();
+
+      const formData = new FormData();
+      formData.append('path', path);
+      formData.append('name', name);
+      formData.append('custom_token', customToken);
+      formData.append('permissions', perms.join(','));
+      formData.append('auto_create', 'true');
+
+      try {
+        const res = await fetch('/api/create_session', { method: 'POST', body: formData });
+        const result = await res.json();
+        
+        if (res.ok && result.status === 'success') {
+          showToast('会话创建成功！', 'success');
+          
+          // 展示结果卡片
+          const resCard = document.getElementById('newSessionResult');
+          resCard.classList.remove('hidden');
+          document.getElementById('resultSessionName').innerText = result.session.name;
+          document.getElementById('shareUrlText').innerText = result.share_url;
+          document.getElementById('qrCodeImg').src = `/api/qrcode?text=${encodeURIComponent(result.share_url)}`;
+          document.getElementById('openWorkspaceBtn').href = result.share_url;
+          
+          // 滚动到结果卡片
+          resCard.scrollIntoView({ behavior: 'smooth' });
+
+          // 刷新活跃会话列表
+          fetchActiveSessions();
+        } else {
+          showToast(result.detail || '创建会话失败', 'error');
+        }
+      } catch (err) {
+        showToast('创建失败: ' + err, 'error');
+      } finally {
+        btn.disabled = false;
+        btn.classList.remove('opacity-75');
+      }
+    }
+
+    function copyShareUrl() {
+      const url = document.getElementById('shareUrlText').innerText;
+      copyText(url, '局域网传输链接已复制！');
+    }
+
+    async function fetchActiveSessions() {
+      const listEl = document.getElementById('activeSessionsList');
+      if (!listEl) return;
+      try {
+        const res = await fetch('/api/sessions');
+        const list = await res.json();
+        if (!list || list.length === 0) {
+          listEl.innerHTML = '<div class="text-xs text-slate-400 text-center py-6">暂无活跃会话，请在左侧创建</div>';
+          return;
+        }
+
+        listEl.innerHTML = list.map(item => {
+          const permBadges = (item.permissions || []).map(p => {
+            if (p === 'upload') return '<span class="text-[10px] bg-emerald-50 text-emerald-600 px-1.5 py-0.5 rounded border border-emerald-200">可传</span>';
+            if (p === 'browse') return '<span class="text-[10px] bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded border border-blue-200">可看</span>';
+            if (p === 'download') return '<span class="text-[10px] bg-amber-50 text-amber-600 px-1.5 py-0.5 rounded border border-amber-200">可下</span>';
+            return '';
+          }).join(' ');
+
+          return `
+            <div class="p-3.5 rounded-xl border border-slate-200 hover:border-indigo-300 bg-slate-50/60 hover:bg-indigo-50/20 transition flex items-center justify-between">
+              <div class="min-w-0 flex-1 pr-3">
+                <div class="flex items-center space-x-2">
+                  <span class="font-bold text-sm text-slate-800 truncate">${item.name}</span>
+                  <div class="flex items-center space-x-1">${permBadges}</div>
+                </div>
+                <p class="text-xs font-mono text-slate-500 truncate mt-0.5" title="${item.storage_dir}">${item.storage_dir}</p>
+                <div class="text-[11px] text-slate-400 mt-1">创建时间: ${item.created_at}</div>
+              </div>
+              <div class="flex items-center space-x-2 flex-shrink-0">
+                <button
+                  type="button"
+                  onclick="openEditPermModal('${item.token}', '${item.name}', ${JSON.stringify(item.permissions || []).replace(/"/g, '&quot;')})"
+                  class="px-2.5 py-1.5 bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 text-slate-700 rounded-lg text-xs font-semibold border border-slate-200 transition"
+                  title="修改访问权限"
+                >
+                  修改权限
+                </button>
+                <a href="/s/${item.token}" target="_blank" class="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold shadow-sm transition">
+                  进入
+                </a>
+                <button onclick="closeSession('${item.token}')" class="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 transition" title="关闭会话">
+                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          `;
+        }).join('');
+      } catch (err) {
+        listEl.innerHTML = '<div class="text-xs text-rose-500 text-center py-4">加载失败</div>';
+      }
+    }
+
+    async function closeSession(token) {
+      if (!confirm('确定关闭该传输会话吗？关闭后将断开所有连接。')) return;
+      try {
+        const res = await fetch(`/api/session/${token}`, { method: 'DELETE' });
+        if (res.ok) {
+          showToast('会话已关闭', 'success');
+          fetchActiveSessions();
+        }
+      } catch (err) {
+        showToast('关闭失败: ' + err, 'error');
+      }
+    }
+
+
+    /* ==============================================================
+     * 通道权限修改功能 (仅主机可用)
+     * ============================================================== */
+    function openEditPermModal(token, name, permissions) {
+      const modal = document.getElementById('editPermModal');
+      if (!modal) return;
+      document.getElementById('editPermToken').value = token;
+      if (name) {
+        document.getElementById('editPermModalTitle').innerText = `修改权限 - ${name}`;
+      } else {
+        document.getElementById('editPermModalTitle').innerText = '修改通道访问权限';
+      }
+      const perms = Array.isArray(permissions) ? permissions : (permissions ? String(permissions).split(',') : []);
+      document.getElementById('edit_perm_upload').checked = perms.includes('upload');
+      document.getElementById('edit_perm_browse').checked = perms.includes('browse');
+      document.getElementById('edit_perm_download').checked = perms.includes('download');
+      updateEditCardStyles();
+      modal.classList.remove('hidden');
+    }
+
+    function closeEditPermModal() {
+      const modal = document.getElementById('editPermModal');
+      if (modal) modal.classList.add('hidden');
+    }
+
+    function updateEditCardStyles() {
+      ['upload', 'browse', 'download'].forEach(key => {
+        const checkbox = document.getElementById(`edit_perm_${key}`);
+        const card = document.getElementById(`card_edit_${key}`);
+        if (checkbox && card) {
+          if (checkbox.checked) {
+            card.classList.add('border-indigo-500', 'bg-indigo-50/40');
+            card.classList.remove('border-slate-200', 'bg-slate-50/50');
+          } else {
+            card.classList.remove('border-indigo-500', 'bg-indigo-50/40');
+            card.classList.add('border-slate-200', 'bg-slate-50/50');
+          }
+        }
+      });
+    }
+
+    function setEditPermPreset(preset) {
+      const up = document.getElementById('edit_perm_upload');
+      const br = document.getElementById('edit_perm_browse');
+      const dl = document.getElementById('edit_perm_download');
+      if (preset === 'full') {
+        up.checked = true; br.checked = true; dl.checked = true;
+      } else if (preset === 'upload_only') {
+        up.checked = true; br.checked = false; dl.checked = false;
+      } else if (preset === 'download_only') {
+        up.checked = false; br.checked = true; dl.checked = true;
+      }
+      updateEditCardStyles();
+    }
+
+    async function submitEditPermissions() {
+      const token = document.getElementById('editPermToken').value;
+      if (!token) return;
+
+      const perms = [];
+      if (document.getElementById('edit_perm_upload').checked) perms.push('upload');
+      if (document.getElementById('edit_perm_browse').checked) perms.push('browse');
+      if (document.getElementById('edit_perm_download').checked) perms.push('download');
+
+      if (perms.length === 0) {
+        showToast('至少保留一项权限（上传、浏览或下载）', 'error');
+        return;
+      }
+
+      const btn = document.getElementById('saveEditPermBtn');
+      btn.disabled = true;
+      btn.innerText = '正在保存...';
+
+      try {
+        const formData = new FormData();
+        formData.append('permissions', perms.join(','));
+
+        const res = await fetch(`/api/session/${token}/permissions`, {
+          method: 'POST',
+          body: formData
+        });
+
+        const data = await res.json();
+        if (res.ok) {
+          showToast('权限修改成功！已即时同步至所有设备', 'success');
+          closeEditPermModal();
+          if (VIEW_MODE === 'host') {
+            fetchActiveSessions();
+          } else if (VIEW_MODE === 'workspace') {
+            setTimeout(() => { window.location.reload(); }, 600);
+          }
+        } else {
+          showToast(data.detail || '修改失败', 'error');
+        }
+      } catch (err) {
+        showToast('网络请求异常: ' + err, 'error');
+      } finally {
+        btn.disabled = false;
+        btn.innerText = '保存修改';
+      }
+    }
+
+
+    function goToGuestCode() {
+      const input = document.getElementById('guestCodeInput');
+      if (!input) return;
+      const code = input.value.trim();
+      if (!code) {
+        showToast('请输入传输码', 'error');
+        input.focus();
+        return;
+      }
+      window.location.href = `/s/${encodeURIComponent(code)}`;
+    }
+
+
+    /* ==============================================================
+     * 模块 2: 传输工作台 (Workspace View) 逻辑
+     * ============================================================== */
+    function copyCurrentUrl() {
+      copyText(window.location.href, '传输页面链接已复制！可发送给局域网其他设备');
+    }
+
+    function toggleWorkspaceQrModal() {
+      const modal = document.getElementById('workspaceQrModal');
+      modal.classList.toggle('hidden');
+    }
+
+    // 格式化文件图标
+    function getFileIcon(name, isDir) {
+      if (isDir) {
+        return `<svg class="w-5 h-5 text-amber-500" fill="currentColor" viewBox="0 0 20 20"><path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"></path></svg>`;
+      }
+      const ext = name.split('.').pop().toLowerCase();
+      if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'].includes(ext)) {
+        return `<svg class="w-5 h-5 text-purple-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>`;
+      }
+      if (['mp4', 'mkv', 'mov', 'avi'].includes(ext)) {
+        return `<svg class="w-5 h-5 text-rose-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>`;
+      }
+      if (['zip', 'rar', '7z', 'tar', 'gz'].includes(ext)) {
+        return `<svg class="w-5 h-5 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" /></svg>`;
+      }
+      if (['pdf', 'doc', 'docx', 'txt', 'md'].includes(ext)) {
+        return `<svg class="w-5 h-5 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>`;
+      }
+      return `<svg class="w-5 h-5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" /></svg>`;
+    }
+
+    // 加载文件与目录列表 (仅具备 CAN_BROWSE 时有效)
+    async function loadFiles(subpath = "") {
+      if (!CAN_BROWSE) return;
+      currentSubpath = subpath;
+      const tbody = document.getElementById('filesTableBody');
+      const breadcrumb = document.getElementById('breadcrumbNav');
+      if (!tbody || !breadcrumb) return;
+
+      try {
+        const res = await fetch(`/api/files?token=${SESSION_TOKEN}&subpath=${encodeURIComponent(subpath)}`);
+        if (!res.ok) {
+          const err = await res.json();
+          showToast(err.detail || '读取目录失败', 'error');
+          return;
+        }
+
+        const data = await res.json();
+        cachedFilesList = data.items;
+
+        // 渲染面包屑
+        breadcrumb.innerHTML = data.breadcrumbs.map((b, idx) => {
+          const isLast = idx === data.breadcrumbs.length - 1;
+          return `
+            <div class="flex items-center space-x-1 flex-shrink-0">
+              ${idx > 0 ? '<svg class="w-3.5 h-3.5 text-slate-300" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd"></path></svg>' : ''}
+              ${isLast ? `<span class="text-slate-800 font-bold text-xs">${b.name}</span>` : `<button onclick="loadFiles('${b.path}')" class="text-indigo-600 hover:text-indigo-800 hover:underline text-xs">${b.name}</button>`}
+            </div>
+          `;
+        }).join('');
+
+        // 渲染表格
+        renderFilesTable(cachedFilesList);
+
+      } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="4" class="px-6 py-8 text-center text-rose-500 text-xs">加载出错: ${err}</td></tr>`;
+      }
+    }
+
+    function renderFilesTable(items) {
+      const tbody = document.getElementById('filesTableBody');
+      if (!tbody) return;
+      if (!items || items.length === 0) {
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="4" class="px-6 py-12 text-center text-slate-400 text-xs">
+              <svg class="w-8 h-8 mx-auto text-slate-300 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 19a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1M5 19h14a2 2 0 002-2v-5a2 2 0 00-2-2H9a2 2 0 00-2 2v5a2 2 0 01-2 2z" />
+              </svg>
+              该文件夹下暂无文件
+            </td>
+          </tr>
+        `;
+        return;
+      }
+
+      tbody.innerHTML = items.map(item => {
+        let actionHtml = '';
+        if (item.is_dir) {
+          actionHtml = `
+            <div class="flex items-center justify-end space-x-2">
+              <button onclick="loadFiles('${item.relative_path}')" class="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-xs font-semibold">进入</button>
+              ${CAN_DOWNLOAD 
+                ? `<a href="/api/download_zip?token=${SESSION_TOKEN}&subpath=${encodeURIComponent(item.relative_path)}" class="px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 rounded text-xs font-semibold" title="即时内存压缩打包下载">ZIP打包</a>` 
+                : `<span class="text-xs text-slate-300">禁下载</span>`
+              }
+            </div>
+          `;
+        } else {
+          actionHtml = CAN_DOWNLOAD 
+            ? `
+              <a href="/api/download?token=${SESSION_TOKEN}&relative_path=${encodeURIComponent(item.relative_path)}" class="inline-flex items-center px-3 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg text-xs font-semibold shadow-sm transition">
+                <svg class="w-3.5 h-3.5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+                下载
+              </a>
+            `
+            : `<span class="text-xs text-slate-400 bg-slate-100 px-2.5 py-1 rounded-lg">仅供浏览</span>`;
+        }
+
+        return `
+          <tr class="hover:bg-slate-50/80 transition group">
+            <td class="px-6 py-3.5 font-medium text-slate-900 flex items-center space-x-3">
+              <span class="flex-shrink-0">${getFileIcon(item.name, item.is_dir)}</span>
+              ${item.is_dir 
+                ? `<button onclick="loadFiles('${item.relative_path}')" class="text-slate-800 hover:text-indigo-600 font-bold text-left hover:underline truncate max-w-xs sm:max-w-md">${item.name}</button>`
+                : `<span class="truncate max-w-xs sm:max-w-md" title="${item.name}">${item.name}</span>`
+              }
+            </td>
+            <td class="px-6 py-3.5 text-slate-500 font-mono text-xs whitespace-nowrap">
+              ${item.size_fmt}
+            </td>
+            <td class="px-6 py-3.5 text-slate-400 text-xs whitespace-nowrap hidden md:table-cell">
+              ${item.modified_at}
+            </td>
+            <td class="px-6 py-3.5 text-right whitespace-nowrap">
+              ${actionHtml}
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    function handleSearch(keyword) {
+      const q = keyword.trim().toLowerCase();
+      if (!q) {
+        renderFilesTable(cachedFilesList);
+        return;
+      }
+      const filtered = cachedFilesList.filter(item => item.name.toLowerCase().includes(q));
+      renderFilesTable(filtered);
+    }
+
+    function downloadCurrentFolderZip() {
+      if (!CAN_DOWNLOAD) {
+        showToast('当前通道未开放下载权限', 'error');
+        return;
+      }
+      const url = `/api/download_zip?token=${SESSION_TOKEN}&subpath=${encodeURIComponent(currentSubpath)}`;
+      window.location.href = url;
+    }
+
+
+    /* ==============================================================
+     * 模块 3: 文件与文件夹上传与拖拽 (Chunked Streaming & Progress)
+     * ============================================================== */
+    function handleDragOver(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      document.getElementById('dropzone').classList.add('dropzone-active');
+    }
+
+    function handleDragLeave(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      document.getElementById('dropzone').classList.remove('dropzone-active');
+    }
+
+    async function handleDrop(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      document.getElementById('dropzone').classList.remove('dropzone-active');
+
+      const items = e.dataTransfer.items;
+      if (!items || items.length === 0) return;
+
+      const filesToUpload = [];
+
+      // 递归解析 DataTransferItem Entry，完整保留文件夹相对路径
+      async function traverseEntry(entry, currentPath = "") {
+        if (entry.isFile) {
+          const file = await new Promise((resolve, reject) => entry.file(resolve, reject));
+          const relPath = currentPath ? `${currentPath}/${file.name}` : file.name;
+          filesToUpload.push({ file, relativePath: relPath });
+        } else if (entry.isDirectory) {
+          const dirReader = entry.createReader();
+          const readEntries = async () => {
+            const entries = await new Promise((resolve, reject) => dirReader.readEntries(resolve, reject));
+            if (entries.length > 0) {
+              for (const child of entries) {
+                const newPath = currentPath ? `${currentPath}/${entry.name}` : entry.name;
+                await traverseEntry(child, newPath);
+              }
+              await readEntries(); // 递归读取所有批次
+            }
+          };
+          await readEntries();
+        }
+      }
+
+      const promises = [];
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.webkitGetAsEntry) {
+          const entry = item.webkitGetAsEntry();
+          if (entry) promises.push(traverseEntry(entry));
+        } else if (item.kind === 'file') {
+          const file = item.getAsFile();
+          if (file) filesToUpload.push({ file, relativePath: file.name });
+        }
+      }
+
+      await Promise.all(promises);
+      if (filesToUpload.length > 0) {
+        startUploadQueue(filesToUpload);
+      }
+    }
+
+    function handleFileSelect(e) {
+      const files = Array.from(e.target.files);
+      if (files.length === 0) return;
+      const list = files.map(f => ({ file: f, relativePath: f.name }));
+      startUploadQueue(list);
+      e.target.value = '';
+    }
+
+    function handleFolderSelect(e) {
+      const files = Array.from(e.target.files);
+      if (files.length === 0) return;
+      // webkitRelativePath 包含完整相对路径
+      const list = files.map(f => ({
+        file: f,
+        relativePath: f.webkitRelativePath || f.name
+      }));
+      startUploadQueue(list);
+      e.target.value = '';
+    }
+
+    // 上传队列调度与真实速度监控
+    async function startUploadQueue(queue) {
+      if (isUploading) {
+        showToast('当前已有文件正在上传中，请稍候', 'warning');
+        return;
+      }
+      isUploading = true;
+
+      const progressPanel = document.getElementById('uploadProgressPanel');
+      const progressBar = document.getElementById('uploadProgressBar');
+      const percentText = document.getElementById('uploadPercentText');
+      const speedText = document.getElementById('uploadSpeedText');
+      const bytesText = document.getElementById('uploadBytesText');
+      const queueText = document.getElementById('uploadQueueProgressText');
+      const fileListEl = document.getElementById('uploadFileList');
+
+      progressPanel.classList.remove('hidden');
+
+      const totalFiles = queue.length;
+      let totalBytesAll = queue.reduce((acc, item) => acc + item.file.size, 0);
+      let uploadedBytesPriorFiles = 0;
+
+      fileListEl.innerHTML = queue.map((item, idx) => `
+        <div id="upload_item_${idx}" class="flex items-center justify-between text-slate-500">
+          <span class="truncate max-w-sm">${item.relativePath}</span>
+          <span class="text-xs font-semibold text-slate-400">等待中</span>
+        </div>
+      `).join('');
+
+      for (let i = 0; i < totalFiles; i++) {
+        const item = queue[i];
+        queueText.innerText = `${i + 1}/${totalFiles}`;
+        
+        const itemRow = document.getElementById(`upload_item_${i}`);
+        if (itemRow) {
+          itemRow.querySelector('span:last-child').className = 'text-xs font-semibold text-indigo-600';
+          itemRow.querySelector('span:last-child').innerText = '上传中...';
+          itemRow.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+
+        // 如果单文件大小超过 1GB，跳过并提示
+        if (item.file.size > 1024 * 1024 * 1024) {
+          if (itemRow) {
+            itemRow.querySelector('span:last-child').className = 'text-xs font-semibold text-rose-500';
+            itemRow.querySelector('span:last-child').innerText = '超限 ( > 1GB )';
+          }
+          showToast(`文件 ${item.file.name} 超过 1GB 上限被跳过`, 'error');
+          uploadedBytesPriorFiles += item.file.size;
+          continue;
+        }
+
+        // 如果是在子目录下上传，把当前的 currentSubpath 拼在前面
+        let targetRelPath = item.relativePath;
+        if (currentSubpath) {
+          targetRelPath = `${currentSubpath}/${item.relativePath}`;
+        }
+
+        await uploadSingleFile(item.file, targetRelPath, (loaded, fileTotal, speedBps) => {
+          const currentTotalLoaded = uploadedBytesPriorFiles + loaded;
+          const pct = totalBytesAll > 0 ? Math.min(100, Math.round((currentTotalLoaded / totalBytesAll) * 100)) : 100;
+          progressBar.style.width = `${pct}%`;
+          percentText.innerText = `${pct}%`;
+          speedText.innerText = `${(speedBps / (1024 * 1024)).toFixed(1)} MB/s`;
+          bytesText.innerText = `${(currentTotalLoaded / (1024 * 1024)).toFixed(1)} MB / ${(totalBytesAll / (1024 * 1024)).toFixed(1)} MB`;
+        }).then(() => {
+          if (itemRow) {
+            itemRow.querySelector('span:last-child').className = 'text-xs font-semibold text-emerald-600';
+            itemRow.querySelector('span:last-child').innerText = '✓ 完成';
+          }
+        }).catch((err) => {
+          if (itemRow) {
+            itemRow.querySelector('span:last-child').className = 'text-xs font-semibold text-rose-500';
+            itemRow.querySelector('span:last-child').innerText = '✗ 失败';
+          }
+          showToast(`上传 ${item.file.name} 失败: ${err}`, 'error');
+        });
+
+        uploadedBytesPriorFiles += item.file.size;
+      }
+
+      isUploading = false;
+      showToast('文件队列上传完毕！', 'success');
+      loadFiles(currentSubpath);
+
+      setTimeout(() => {
+        if (!isUploading) progressPanel.classList.add('hidden');
+      }, 5000);
+    }
+
+    function uploadSingleFile(file, relativePath, onProgress) {
+      return new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', `/api/upload?token=${SESSION_TOKEN}`);
+
+        let lastTime = Date.now();
+        let lastLoaded = 0;
+
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) {
+            const now = Date.now();
+            const timeDelta = (now - lastTime) / 1000;
+            let speedBps = 0;
+            if (timeDelta > 0.2) {
+              speedBps = (e.loaded - lastLoaded) / timeDelta;
+              lastTime = now;
+              lastLoaded = e.loaded;
+            }
+            onProgress(e.loaded, e.total, speedBps);
+          }
+        };
+
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            resolve(JSON.parse(xhr.responseText));
+          } else {
+            let detail = '上传失败';
+            try {
+              const res = JSON.parse(xhr.responseText);
+              detail = res.detail || detail;
+            } catch (_) {}
+            reject(detail);
+          }
+        };
+
+        xhr.onerror = () => reject('网络通信异常');
+
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('relative_path', relativePath);
+        xhr.send(formData);
+      });
+    }
+
+
+    /* ==============================================================
+     * 模块 4: WebSocket 实时无感多端协同
+     * ============================================================== */
+    function initWebSocket() {
+      if (!SESSION_TOKEN) return;
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${protocol}//${window.location.host}/ws/${SESSION_TOKEN}`;
+      const ws = new WebSocket(wsUrl);
+
+      ws.onopen = () => {
+        // 心跳保活
+        setInterval(() => {
+          if (ws.readyState === WebSocket.OPEN) ws.send('ping');
+        }, 20000);
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === 'online_count') {
+            const el = document.getElementById('onlineCount');
+            if (el) el.innerText = data.count;
+          } else if (data.type === 'file_uploaded') {
+            showToast(`收到新文件: ${data.filename} (${data.size_fmt})`, 'info');
+            // 静默无感平滑刷新当前文件夹
+            loadFiles(currentSubpath);
+          } else if (data.type === 'session_closed') {
+            alert('当前会话已被主机关闭！');
+            window.location.reload();
+          } else if (data.type === 'permissions_updated') {
+            showToast(data.msg || '主机已调整本通道访问权限，页面正在同步更新...', 'info');
+            setTimeout(() => { window.location.reload(); }, 1000);
+          }
+        } catch (_) {}
+      };
+
+      ws.onclose = () => {
+        // 5秒后尝试重连
+        setTimeout(initWebSocket, 5000);
+      };
+    }
+
+
+    // 页面初始化
+    document.addEventListener('DOMContentLoaded', () => {
+      if (VIEW_MODE === 'host') {
+        fetchActiveSessions();
+        // 启动时自动做一次静默校验
+        validateDirectory(false);
+      } else if (VIEW_MODE === 'workspace') {
+        loadFiles("");
+        initWebSocket();
+      }
+    });
+  </script>
+</body>
+</html>
